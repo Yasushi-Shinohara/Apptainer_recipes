@@ -1,0 +1,64 @@
+Bootstrap: docker
+From: intel/oneapi-hpckit:2025.1.1-0-devel-ubuntu22.04
+
+%post
+    apt-get update && apt-get install -y build-essential
+    echo 'source /opt/intel/oneapi/setvars.sh' >> /environment
+    echo 'source /opt/intel/oneapi/setvars.sh' >> /etc/profile.d/oneapi.sh
+
+
+    # バージョンのログ
+    echo "==== Compilers ===="
+    icx --version || true
+    ifx --version || true
+    echo "==== MPI ===="
+    mpiifx --version || true
+    mpiicx --version || true
+    mpirun --version || true
+    echo "==== BLAS/LAPACK/FFTW/ScaLAPACK/ELPA ===="
+    pkg-config --list-all 2>/dev/null | grep -E 'fftw|elpa|scalapack' || true
+
+    # 取得する QE のバージョン（必要ならここを書き換え）
+    QEV="qe-7.4.1"     # 例: qe-7.3 / qe-7.2 / qe-7.1 など
+    SRC_DIR=/tmp/qe_src
+    QE_HOME=/opt/qe
+    mkdir -p ${SRC_DIR} ${QE_HOME}
+    cd ${SRC_DIR}
+
+    # ソース取得（GitHub の公式リリース tarball）
+    wget -q https://github.com/QEF/q-e/archive/refs/tags/${QEV}.tar.gz
+    tar xf ${QEV}.tar.gz
+    cd q-e-${QEV}
+
+    # 環境のヒント（OpenMPI/FFTW/ScaLAPACK/HDF5 を使う）
+    # configure は自動検出を試みるので、まずは素直に通す
+    ./configure \
+        --prefix=${QE_HOME} \
+        FC=mpiifx \
+        CC=mpiicx \
+        --with-scalapack=intel \
+        --with-cuda=no \
+        --enable-parallel \
+        --with-mpi \
+        --with-openmp
+
+    # 代表的なパッケージをビルド（pw, ph, cp, pp など）
+    make -j"$(nproc)" all
+    make install
+
+    # 便利スクリプト（バージョン表示）
+    echo "${QEV}" > ${QE_HOME}/QE_VERSION.txt
+
+    # 後片付け
+    rm -rf ${SRC_DIR}
+
+%environment
+    source /opt/intel/oneapi/setvars.sh
+    export QE_HOME=/opt/qe
+    export PATH=$QE_HOME/bin:$PATH
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+
+%runscript
+    echo "Intel oneAPI HPC Toolkit container is ready."
+    exec "$@"
